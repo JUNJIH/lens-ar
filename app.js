@@ -1,23 +1,19 @@
 // ─────────────────────────────────────────────────────────
-// LENS app.js（改良版）— canvasでパネルを"絵"として描いて板に貼る
+// LENS app.js（安定版）— canvasで描いた画像を板に確実に貼る
 // ─────────────────────────────────────────────────────────
-// なぜ変えたか：
-//   前の版は a-text で3D空間に文字を直接置いていたが、
-//   標準フォントが日本語に対応しておらず文字が出なかった。
-//   そこで、canvas（プログラムで絵を描ける画板）に日本語の
-//   パネルを1枚描き、それを板テクスチャとして貼る方式にした。
-//   canvasはブラウザ標準の日本語フォントを使えるので文字が出る。
+// 前の版は material に "shader: flat" を渡してエラーになった。
+// この版では shader 指定をやめ、canvasで作った画像を
+// THREE.js のテクスチャとして板に直接貼る、最も安定した方式にした。
 // ─────────────────────────────────────────────────────────
 
 const STORE = { name: "麺屋 こばやし" };
 
-// 登録プロフィール（実アプリでは本人が設定する部分）
 const PROFILES = [
   {
     key: "none",
     label: "レンズOFF",
     accent: "#9ca3af",
-    headline: STORE.name,
+    headline: "麺屋 こばやし",
     lines: ["11:00 - 23:00 営業中", "ラーメン / 一品 / ドリンク"],
   },
   {
@@ -45,8 +41,8 @@ const PROFILES = [
 
 let current = "none";
 
-// ── canvasにパネルを1枚描いて、その画像URL(dataURL)を返す ──
-function drawPanel(p) {
+// ── canvasにパネルを1枚描いて、canvas要素そのものを返す ──
+function drawPanelCanvas(p) {
   const W = 1024;
   const H = 640;
   const canvas = document.createElement("canvas");
@@ -59,12 +55,11 @@ function drawPanel(p) {
   roundRect(ctx, 0, 0, W, H, 32);
   ctx.fill();
 
-  // 上部のアクセント帯（プロフィール色）
+  // 上部のアクセント帯
   ctx.fillStyle = p.accent;
   roundRect(ctx, 0, 0, W, 16, 8);
   ctx.fill();
 
-  // 「レンズON」ラベル（none以外）
   let topY = 90;
   if (p.key !== "none") {
     ctx.fillStyle = p.accent;
@@ -77,11 +72,10 @@ function drawPanel(p) {
   // 見出し
   ctx.fillStyle = p.accent;
   ctx.font = "bold 56px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
-  ctx.textAlign = "left";
   ctx.fillText(p.headline, 60, topY + 60);
 
   // 区切り線
-  ctx.strokeStyle = "#23262b";
+  ctx.strokeStyle = "#3a3f47";
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(60, topY + 100);
@@ -95,10 +89,10 @@ function drawPanel(p) {
     ctx.fillText(line, 60, topY + 180 + i * 80);
   });
 
-  return canvas.toDataURL();
+  return canvas;
 }
 
-// 角丸四角のヘルパー（canvasには標準の角丸がないので自作）
+// 角丸四角のヘルパー
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -109,22 +103,41 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-// ── マーカー上の板に、描いたパネル画像を貼る ──
-function renderPanel() {
+// ── 板を1枚だけ用意しておき、テクスチャだけ差し替える ──
+let boardEl = null;
+
+function ensureBoard() {
+  if (boardEl) return boardEl;
   const panel = document.getElementById("panel");
+  boardEl = document.createElement("a-plane");
+  boardEl.setAttribute("width", "2.2");
+  boardEl.setAttribute("height", "1.375"); // 1024:640 の比率
+  boardEl.setAttribute("position", "0 0 0");
+  panel.appendChild(boardEl);
+  return boardEl;
+}
+
+// ── canvasの絵を、THREEのテクスチャとして板に貼る ──
+function renderPanel() {
   const p = PROFILES.find((x) => x.key === current);
-  const url = drawPanel(p);
+  const canvas = drawPanelCanvas(p);
+  const board = ensureBoard();
 
-  // 既存の板を消す
-  while (panel.firstChild) panel.removeChild(panel.firstChild);
-
-  // 板を作り、描いた画像をテクスチャとして貼る
-  const board = document.createElement("a-plane");
-  board.setAttribute("width", "2.2");
-  board.setAttribute("height", "1.375"); // 1024:640 の比率に合わせる
-  board.setAttribute("position", "0 0 0");
-  board.setAttribute("material", `src: ${url}; transparent: true;`);
-  panel.appendChild(board);
+  // A-Frameのmeshが用意できてから貼る
+  const apply = () => {
+    const mesh = board.getObject3D("mesh");
+    if (!mesh) {
+      // meshがまだなら少し待って再試行
+      board.addEventListener("loaded", apply, { once: true });
+      return;
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    mesh.material.map = texture;
+    mesh.material.transparent = true;
+    mesh.material.needsUpdate = true;
+  };
+  apply();
 }
 
 // ── プロフィール切り替えチップUI ──
@@ -140,7 +153,7 @@ function buildChips() {
         .querySelectorAll(".chip")
         .forEach((c) => c.classList.remove("active"));
       b.classList.add("active");
-      renderPanel(); // 切り替えたらパネルを描き直す
+      renderPanel();
     };
     wrap.appendChild(b);
   });
