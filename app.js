@@ -123,7 +123,7 @@ function renderPanel() {
   board.setAttribute("width", "2.2");
   board.setAttribute("height", "1.375"); // 1024:640 の比率に合わせる
   board.setAttribute("position", "0 0 0");
-  board.setAttribute("material", `shader: flat; src: ${url}; transparent: true;`);
+  board.setAttribute("material", `src: ${url}; transparent: true;`);
   panel.appendChild(board);
 }
 
