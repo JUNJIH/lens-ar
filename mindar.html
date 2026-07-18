@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>LENS（画像認識版） — 看板そのものを認識する</title>
+
+  <!--
+    ─────────────────────────────────────────────────────────
+    LENS 第三段階：画像認識（MindAR）
+    ─────────────────────────────────────────────────────────
+    hiroマーカー版（index.html）との違い：
+      - AR.js  → 白黒の専用マーカーを認識
+      - MindAR → 実在の画像そのものを認識（機械学習ベース）
+
+    今回はまず動作確認のため、MindAR公式のサンプル画像
+    （card.mind）を認識対象にしている。
+    自分の看板を認識させたくなったら、写真から .mind ファイルを
+    作って差し替えるだけでよい。
+    ─────────────────────────────────────────────────────────
+  -->
+
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Hiragino Kaku Gothic ProN','Noto Sans JP',system-ui,sans-serif; overflow: hidden; }
+
+    #ui {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+      padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
+      background: linear-gradient(180deg, rgba(13,15,18,0), rgba(13,15,18,0.92) 40%);
+      color: #f5f5f4;
+    }
+    #ui .title { font-size: 11px; letter-spacing: .2em; color: #cbd5e1; margin-bottom: 8px; }
+    #chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+    .chip {
+      flex: 0 0 auto; padding: 9px 13px; border-radius: 999px;
+      border: 1px solid #3a3f47; background: rgba(28,31,36,.8);
+      color: #f5f5f4; font-size: 13px; font-weight: 700; white-space: nowrap;
+      cursor: pointer; -webkit-tap-highlight-color: transparent;
+    }
+    .chip.active { background: #f5f5f4; color: #0d0f12; border-color: #f5f5f4; }
+
+    #hint {
+      position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+      z-index: 10; background: rgba(13,15,18,.82); color: #f5f5f4;
+      padding: 10px 16px; border-radius: 999px; font-size: 13px;
+      border: 1px solid #3a3f47; transition: opacity .3s; text-align: center;
+    }
+    #hint.hidden { opacity: 0; }
+    #hint a { color: #7dd3fc; }
+  </style>
+</head>
+<body>
+
+  <div id="hint">対象の画像にカメラを向けてください</div>
+
+  <!-- ▼ MindARのシーン。imageTargetSrc に認識対象ファイルを指定 -->
+  <a-scene
+    mindar-image="imageTargetSrc: https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.2.5/examples/image-tracking/assets/card-example/card.mind; autoStart: true; uiLoading: no; uiError: no; uiScanning: no;"
+    color-space="sRGB"
+    renderer="colorManagement: true, physicallyCorrectLights"
+    vr-mode-ui="enabled: false"
+    device-orientation-permission-ui="enabled: false"
+  >
+    <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+    <!-- ▼ 認識対象0番。認識されるとこの中身が表示される -->
+    <a-entity id="target" mindar-image-target="targetIndex: 0">
+      <a-entity id="panel"></a-entity>
+    </a-entity>
+  </a-scene>
+
+  <div id="ui">
+    <div class="title">誰として見る？</div>
+    <div id="chips"></div>
+  </div>
+
+  <script src="mindar-app.js"></script>
+</body>
+</html>
