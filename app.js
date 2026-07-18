@@ -37,6 +37,13 @@ const PROFILES = [
     headline: "あなた向けのおトク",
     lines: ["醤油ラーメン並 ¥650", "学割:ライス大盛り無料"],
   },
+    {
+    key: "d",
+    label: "がっつり 25歳",
+    accent: "#e0a02044",
+    headline: "あなた向けの特盛",
+    lines: ["マシマシラーメン ¥1000", "がっつり食べたい人向け"],
+  },
 ];
 
 let current = "none";
