@@ -10,8 +10,8 @@
     LENS：画像認識 + 複数ターゲット + 触れるパネル
     ─────────────────────────────────────────────────────────
     今回の追加：パネルをタップできるようにした。
-      - cursor(rayOrigin: mouse) + raycaster で3D上の板を叩く
-      - 板に class="clickable" を付けたものだけが対象
+      - 画面を触った位置からカメラ越しに光線を飛ばして板に当てる
+      - 判定はJS側で自前に実装（後から生成した板も確実に拾うため）
       - 画面遷移：ホーム →「お店のおすすめ」/「あなたの興味」
     ─────────────────────────────────────────────────────────
   -->
@@ -60,10 +60,6 @@
     device-orientation-permission-ui="enabled: false"
   >
     <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
-
-    <!-- ▼ タップ判定用。画面を触った位置から光線を飛ばして板に当てる -->
-    <a-entity cursor="rayOrigin: mouse; fuse: false"
-              raycaster="objects: .clickable; far: 100"></a-entity>
 
     <!-- ▼ 認識対象 0番 -->
     <a-entity class="lens-target" data-index="0" mindar-image-target="targetIndex: 0">

@@ -10,7 +10,7 @@
 //       → プロフィールが何万通りでも、店は何も書き足さなくていい。
 //
 // 【2】パネルが触れるようになった
-//   板を「本体」と「ボタン」に分け、ボタンにclickableを付けた。
+//   板を「本体」と「ボタン」に分け、自前のレイキャストで当たり判定する。
 //   画面遷移：ホーム →「お店のおすすめ」/「あなたの興味」→ 戻る
 // ─────────────────────────────────────────────────────────
 
@@ -313,10 +313,6 @@ function ensureParts(targetIndex) {
   const btnL = mkBtn(-0.25);
   const btnR = mkBtn(0.25);
 
-  // タップされたときの処理
-  btnL.addEventListener("click", () => onButton(targetIndex, "L"));
-  btnR.addEventListener("click", () => onButton(targetIndex, "R"));
-
   panelParts[targetIndex] = { board, btnL, btnR };
   return panelParts[targetIndex];
 }
@@ -391,9 +387,11 @@ function buildChips() {
   });
 }
 
+const foundTargets = new Set(); // 今カメラに映っている看板
+
 function wireTargetEvents() {
   const hint = document.getElementById("hint");
-  const found = new Set();
+  const found = foundTargets;
 
   document.querySelectorAll(".lens-target").forEach((el) => {
     const idx = el.dataset.index;
@@ -408,8 +406,73 @@ function wireTargetEvents() {
   });
 }
 
+// ─────────────────────────────────────────────
+// タップ判定（自前で光線を飛ばす）
+// ─────────────────────────────────────────────
+// A-Frameの標準機能は「判定対象のリスト」を最初に作って持ち続けるため、
+// 後からJSで生成したボタンを認識してくれないことがある。
+// そこで自分で光線（レイ）を飛ばして当たり判定をする。
+//
+//   画面を触った位置 → カメラからその方向へ光線
+//   → 板に当たったか判定 → 当たったボタンの処理を呼ぶ
+//
+// この仕組みは、将来ハンドトラッキングにしても同じ。
+// 「指先から光線を飛ばす」に変わるだけ。
+// ─────────────────────────────────────────────
+function setupTapHandling() {
+  const sceneEl = document.querySelector("a-scene");
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+
+  const handleTap = (clientX, clientY) => {
+    const canvas = sceneEl.canvas;
+    if (!canvas || !sceneEl.camera) return;
+
+    // 画面座標 → -1〜1 の座標系に変換（3Dの世界の流儀）
+    const rect = canvas.getBoundingClientRect();
+    pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+
+    raycaster.setFromCamera(pointer, sceneEl.camera);
+
+    // 今カメラに映っている看板のボタンだけを判定対象にする
+    const candidates = [];
+    Object.keys(panelParts).forEach((idx) => {
+      if (!foundTargets.has(String(idx))) return;
+      const parts = panelParts[idx];
+      [["L", parts.btnL], ["R", parts.btnR]].forEach(([side, el]) => {
+        const mesh = el.getObject3D("mesh");
+        if (mesh) {
+          mesh.userData.lens = { idx: Number(idx), side };
+          candidates.push(mesh);
+        }
+      });
+    });
+
+    if (candidates.length === 0) return;
+
+    const hits = raycaster.intersectObjects(candidates, false);
+    if (hits.length > 0) {
+      const info = hits[0].object.userData.lens;
+      onButton(info.idx, info.side);
+    }
+  };
+
+  // スマホのタッチ
+  sceneEl.addEventListener("touchend", (e) => {
+    const t = e.changedTouches && e.changedTouches[0];
+    if (t) handleTap(t.clientX, t.clientY);
+  });
+
+  // PCのクリック（動作確認用）
+  sceneEl.addEventListener("click", (e) => {
+    handleTap(e.clientX, e.clientY);
+  });
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   buildChips();
   wireTargetEvents();
+  setupTapHandling();
   startPolling();
 });
