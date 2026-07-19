@@ -12,6 +12,16 @@
     今回の追加：パネルをタップできるようにした。
       - 画面を触った位置からカメラ越しに光線を飛ばして板に当てる
       - 判定はJS側で自前に実装（後から生成した板も確実に拾うため）
+
+    【動作調整】非力な端末向けに速さ side へ振っている
+      maxTrack: 1        … 同時に追跡する枚数を1枚に（処理が半減）
+      warmupTolerance: 1 … 1フレーム確認したらすぐ表示（出るのが速くなる）
+      missTolerance: 8   … 少し見失っても粘る（チラつき防止）
+      filterMinCF: 0.005 … 反応を速く（上げるほど速いが揺れやすい）
+      filterBeta: 5000   … 動きへの追従を強く（遅れが減る）
+
+    トレードオフ：速さを取れば揺れる、安定を取れば遅れる。
+    端末に合わせて振り分けるのが調整の勘所。
       - 画面遷移：ホーム →「お店のおすすめ」/「あなたの興味」
     ─────────────────────────────────────────────────────────
   -->
@@ -100,7 +110,12 @@
   <div id="hint">対象の画像にカメラを向けてください</div>
 
   <a-scene
-    mindar-image="imageTargetSrc: ./targets.mind; autoStart: true; uiLoading: no; uiError: no; uiScanning: no; maxTrack: 2;"
+    mindar-image="imageTargetSrc: ./targets.mind; autoStart: true; uiLoading: no; uiError: no; uiScanning: no;
+                  maxTrack: 1;
+                  warmupTolerance: 1;
+                  missTolerance: 8;
+                  filterMinCF: 0.005;
+                  filterBeta: 5000;"
     color-space="sRGB"
     renderer="colorManagement: true, physicallyCorrectLights"
     vr-mode-ui="enabled: false"
