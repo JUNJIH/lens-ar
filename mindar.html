@@ -3,18 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>LENS（画像認識版） — 看板そのものを認識する</title>
+  <title>LENS — 看板が、見る人によって変わる</title>
 
   <!--
     ─────────────────────────────────────────────────────────
-    LENS 第三段階：画像認識（MindAR）＋ 複数ターゲット対応
+    LENS：画像認識 + 複数ターゲット + 触れるパネル
     ─────────────────────────────────────────────────────────
-    変更点：認識対象を2つに増やした。
-      - targetIndex: 0 → 1枚目の画像
-      - targetIndex: 1 → 2枚目の画像
-    .mind ファイルに登録した順番が、そのまま index になる。
-
-    パネルの中身は「看板 × 見る人」の掛け合わせで決まる。
+    今回の追加：パネルをタップできるようにした。
+      - cursor(rayOrigin: mouse) + raycaster で3D上の板を叩く
+      - 板に class="clickable" を付けたものだけが対象
+      - 画面遷移：ホーム →「お店のおすすめ」/「あなたの興味」
     ─────────────────────────────────────────────────────────
   -->
 
@@ -27,11 +25,11 @@
 
     #ui {
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
-      padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
+      padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
       background: linear-gradient(180deg, rgba(13,15,18,0), rgba(13,15,18,0.92) 40%);
       color: #f5f5f4;
     }
-    #ui .title { font-size: 11px; letter-spacing: .2em; color: #cbd5e1; margin-bottom: 8px; }
+    #ui .title { font-size: 11px; letter-spacing: .18em; color: #cbd5e1; margin-bottom: 8px; }
     #chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
     .chip {
       flex: 0 0 auto; padding: 9px 13px; border-radius: 999px;
@@ -62,6 +60,10 @@
     device-orientation-permission-ui="enabled: false"
   >
     <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+    <!-- ▼ タップ判定用。画面を触った位置から光線を飛ばして板に当てる -->
+    <a-entity cursor="rayOrigin: mouse; fuse: false"
+              raycaster="objects: .clickable; far: 100"></a-entity>
 
     <!-- ▼ 認識対象 0番 -->
     <a-entity class="lens-target" data-index="0" mindar-image-target="targetIndex: 0">

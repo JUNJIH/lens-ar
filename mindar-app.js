@@ -1,66 +1,115 @@
 // ─────────────────────────────────────────────────────────
-// LENS mindar-app.js — サーバーからデータを取得する版
+// LENS mindar-app.js — 触れるパネル / 興味マッチング版
 // ─────────────────────────────────────────────────────────
-// 変更点：STORES をコードに直書きするのをやめ、
-//         /api/stores から取ってくるようにした。
+// 大きな変化は2つ。
 //
-//   起動時    → 1回取得して表示
-//   30秒ごと  → 取り直して、変わっていれば描き直す（ポーリング）
+// 【1】パーソナライズが本物になった
+//   前：店がプロフィールごとの文章を用意 → 組合せ爆発で破綻する
+//   今：店は全メニュー（タグ付き）を出すだけ。
+//       アプリがユーザーの興味タグと突き合わせて点数をつけ、並べ替える。
+//       → プロフィールが何万通りでも、店は何も書き足さなくていい。
 //
-// Day2で検討した通り、WebSocketではなくポーリングを選択。
-// 看板にかざした瞬間だけ情報が要るので、常時接続は過剰。
+// 【2】パネルが触れるようになった
+//   板を「本体」と「ボタン」に分け、ボタンにclickableを付けた。
+//   画面遷移：ホーム →「お店のおすすめ」/「あなたの興味」→ 戻る
 // ─────────────────────────────────────────────────────────
 
+// ── 見る人（プロフィール）──
+// 実アプリでは本人が設定する。今は検証用の決め打ち。
 const PROFILES = [
-  { key: "none", label: "レンズOFF", accent: "#9ca3af" },
-  { key: "a", label: "辛いの好き 24歳", accent: "#e8462d" },
-  { key: "b", label: "ヘルシー・お酒 38歳", accent: "#37b58a" },
-  { key: "c", label: "学生・安く 20歳", accent: "#e0a020" },
+  {
+    key: "none", label: "レンズOFF", accent: "#9ca3af",
+    interests: [], budget: null,
+  },
+  {
+    key: "a", label: "辛いの好き 24歳", accent: "#e8462d",
+    interests: ["辛い", "こってり", "スパイス"], budget: 1200,
+  },
+  {
+    key: "b", label: "ヘルシー・お酒 38歳", accent: "#37b58a",
+    interests: ["ヘルシー", "あっさり", "酒", "酒に合う"], budget: 2000,
+  },
+  {
+    key: "c", label: "学生・安く 20歳", accent: "#e0a020",
+    interests: ["安い", "学割", "定番"], budget: 800,
+  },
 ];
 
 let current = "none";
-
-// サーバーから取ってきた看板データを入れる箱。最初は空。
 let STORES = [];
-
-// 前回取得したデータの中身（変化があったかの比較用）
 let lastSnapshot = "";
-
-// 通信状態（画面に出すため）
 let netState = "起動中";
 
-// ── サーバーから看板データを取得する ──
+// 看板ごとの画面状態： "home" | "store" | "you"
+const screens = {};
+
+// ─────────────────────────────────────────────
+// 興味マッチング：ここがパーソナライズの心臓部
+// ─────────────────────────────────────────────
+// メニュー1品ごとに点数をつける。
+//   ・興味タグと一致するタグ1つにつき +10点
+//   ・予算内なら +3点、予算を大きく超えるなら減点
+// 点数順に並べて上位を返す。
+function scoreItem(item, profile) {
+  let score = 0;
+
+  item.tags.forEach((tag) => {
+    if (profile.interests.includes(tag)) score += 10;
+  });
+
+  if (profile.budget != null) {
+    if (item.price <= profile.budget) score += 3;
+    else if (item.price > profile.budget * 1.5) score -= 5;
+  }
+
+  return score;
+}
+
+function pickForYou(store, profile, n = 3) {
+  return store.menu
+    .map((item) => ({ item, score: scoreItem(item, profile) }))
+    .filter((x) => x.score > 0)          // 点数がつかないものは出さない
+    .sort((a, b) => b.score - a.score)   // 高い順
+    .slice(0, n);
+}
+
+function pickRecommends(store, n = 3) {
+  return store.recommends
+    .map((id) => store.menu.find((m) => m.id === id))
+    .filter(Boolean)
+    .slice(0, n);
+}
+
+// ─────────────────────────────────────────────
+// 通信（ポーリング）
+// ─────────────────────────────────────────────
 async function fetchStores() {
   try {
     const res = await fetch("/api/stores");
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
 
-    // 中身が前回と同じなら、描き直さない（無駄な処理を省く）
     const snapshot = JSON.stringify(data.stores);
     if (snapshot === lastSnapshot) {
       netState = "更新なし";
       updateStatus();
       return;
     }
-
     lastSnapshot = snapshot;
     STORES = data.stores;
     netState = "更新あり";
     renderAllPanels();
     updateStatus();
   } catch (e) {
-    // 通信に失敗しても、前回のデータで表示は続ける（壊れない）
     console.error("取得失敗:", e);
     netState = "通信エラー";
     updateStatus();
   }
 }
 
-// ── ポーリング開始（30秒ごとに取り直す） ──
 function startPolling() {
-  fetchStores(); // まず1回
-  setInterval(fetchStores, 30000); // 以後30秒ごと
+  fetchStores();
+  setInterval(fetchStores, 30000);
 }
 
 function updateStatus() {
@@ -68,60 +117,9 @@ function updateStatus() {
   if (el) el.textContent = netState;
 }
 
-// ── canvasにパネルを描く ──
-function drawPanelCanvas(store, profile) {
-  const view = store.views[profile.key];
-  const W = 1024;
-  const H = 640;
-  const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext("2d");
-
-  ctx.fillStyle = "#0d0f12";
-  roundRect(ctx, 0, 0, W, H, 32);
-  ctx.fill();
-
-  ctx.fillStyle = profile.accent;
-  roundRect(ctx, 0, 0, W, 16, 8);
-  ctx.fill();
-
-  let topY = 90;
-
-  ctx.fillStyle = "#6b7280";
-  ctx.font = "28px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
-  ctx.textAlign = "left";
-  ctx.fillText(store.name, 60, topY);
-
-  if (profile.key !== "none") {
-    ctx.fillStyle = profile.accent;
-    ctx.font = "bold 28px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
-    ctx.textAlign = "right";
-    ctx.fillText("● レンズ ON", W - 60, topY);
-    ctx.textAlign = "left";
-  }
-  topY += 20;
-
-  ctx.fillStyle = profile.accent;
-  ctx.font = "bold 56px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
-  ctx.fillText(view.headline, 60, topY + 60);
-
-  ctx.strokeStyle = "#3a3f47";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(60, topY + 100);
-  ctx.lineTo(W - 60, topY + 100);
-  ctx.stroke();
-
-  ctx.fillStyle = "#f5f5f4";
-  ctx.font = "44px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
-  view.lines.forEach((line, i) => {
-    ctx.fillText(line, 60, topY + 180 + i * 80);
-  });
-
-  return canvas;
-}
-
+// ─────────────────────────────────────────────
+// 描画：canvasユーティリティ
+// ─────────────────────────────────────────────
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -132,40 +130,144 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-const boards = [];
-
-function ensureBoard(targetIndex) {
-  if (boards[targetIndex]) return boards[targetIndex];
-
-  const targetEl = document.querySelector(
-    `.lens-target[data-index="${targetIndex}"]`
-  );
-  if (!targetEl) return null; // HTMLに枠が無ければ何もしない
-
-  const panelEl = targetEl.querySelector(".lens-panel");
-  const board = document.createElement("a-plane");
-  board.setAttribute("width", "1");
-  board.setAttribute("height", "0.625");
-  board.setAttribute("position", "0 0 0");
-  panelEl.appendChild(board);
-
-  boards[targetIndex] = board;
-  return board;
+function newCanvas(w, h) {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  return c;
 }
 
-function renderPanel(targetIndex) {
-  const store = STORES[targetIndex];
-  if (!store) return;
+// ── 本体パネルを描く ──
+function drawBoard(store, profile, screen) {
+  const W = 1024, H = 560;
+  const canvas = newCanvas(W, H);
+  const ctx = canvas.getContext("2d");
 
-  const profile = PROFILES.find((x) => x.key === current);
-  const canvas = drawPanelCanvas(store, profile);
-  const board = ensureBoard(targetIndex);
-  if (!board) return;
+  ctx.fillStyle = "#0d0f12";
+  roundRect(ctx, 0, 0, W, H, 28);
+  ctx.fill();
 
+  ctx.fillStyle = profile.accent;
+  roundRect(ctx, 0, 0, W, 14, 7);
+  ctx.fill();
+
+  // ヘッダー
+  ctx.fillStyle = "#6b7280";
+  ctx.font = "28px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText(`${store.name}（${store.genre}）`, 50, 80);
+
+  ctx.textAlign = "right";
+  ctx.fillStyle = "#6b7280";
+  ctx.font = "26px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
+  ctx.fillText(store.hours, W - 50, 80);
+  ctx.textAlign = "left";
+
+  // 画面ごとの中身
+  if (screen === "home") {
+    ctx.fillStyle = profile.accent;
+    ctx.font = "bold 52px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
+    ctx.fillText("何を見ますか？", 50, 200);
+
+    ctx.fillStyle = "#9ca3af";
+    ctx.font = "34px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
+    ctx.fillText("下のボタンを選んでください", 50, 270);
+
+    ctx.fillStyle = "#6b7280";
+    ctx.font = "28px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
+    const who = profile.key === "none" ? "未設定" : profile.interests.join("・");
+    ctx.fillText(`あなたの興味：${who}`, 50, 360);
+    return canvas;
+  }
+
+  const title = screen === "store" ? "お店からのおすすめ" : "あなたの興味から";
+  ctx.fillStyle = profile.accent;
+  ctx.font = "bold 46px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
+  ctx.fillText(title, 50, 160);
+
+  ctx.strokeStyle = "#3a3f47";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(50, 190);
+  ctx.lineTo(W - 50, 190);
+  ctx.stroke();
+
+  // 一覧を描く
+  let rows = [];
+  if (screen === "store") {
+    rows = pickRecommends(store).map((item) => ({ item, note: item.tags.join(" / ") }));
+  } else {
+    const picked = pickForYou(store, profile);
+    if (picked.length === 0) {
+      ctx.fillStyle = "#9ca3af";
+      ctx.font = "34px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
+      ctx.fillText("興味に合うものが見つかりませんでした", 50, 280);
+      ctx.fillText("プロフィールを切り替えてみてください", 50, 340);
+      return canvas;
+    }
+    rows = picked.map(({ item, score }) => ({
+      item,
+      note: item.tags.filter((t) => profile.interests.includes(t)).join(" / ") + `　適合度 ${score}`,
+    }));
+  }
+
+  rows.forEach((row, i) => {
+    const y = 260 + i * 100;
+    ctx.fillStyle = "#f5f5f4";
+    ctx.font = "bold 40px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(row.item.name, 50, y);
+
+    ctx.fillStyle = profile.accent;
+    ctx.font = "bold 38px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(`¥${row.item.price}`, W - 50, y);
+
+    ctx.fillStyle = "#6b7280";
+    ctx.font = "26px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(row.note, 50, y + 36);
+  });
+
+  return canvas;
+}
+
+// ── ボタンを描く ──
+function drawButton(label, accent, filled) {
+  const W = 460, H = 120;
+  const canvas = newCanvas(W, H);
+  const ctx = canvas.getContext("2d");
+
+  if (filled) {
+    ctx.fillStyle = accent;
+    roundRect(ctx, 2, 2, W - 4, H - 4, 24);
+    ctx.fill();
+    ctx.fillStyle = "#0d0f12";
+  } else {
+    ctx.fillStyle = "#16181c";
+    roundRect(ctx, 2, 2, W - 4, H - 4, 24);
+    ctx.fill();
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 3;
+    roundRect(ctx, 2, 2, W - 4, H - 4, 24);
+    ctx.stroke();
+    ctx.fillStyle = "#f5f5f4";
+  }
+
+  ctx.font = "bold 40px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, W / 2, H / 2);
+
+  return canvas;
+}
+
+// ── canvasを板に貼る（共通処理）──
+function applyTexture(planeEl, canvas) {
   const apply = () => {
-    const mesh = board.getObject3D("mesh");
+    const mesh = planeEl.getObject3D("mesh");
     if (!mesh) {
-      board.addEventListener("loaded", apply, { once: true });
+      planeEl.addEventListener("loaded", apply, { once: true });
       return;
     }
     const texture = new THREE.CanvasTexture(canvas);
@@ -177,10 +279,102 @@ function renderPanel(targetIndex) {
   apply();
 }
 
+// ─────────────────────────────────────────────
+// パネルの組み立て（本体1枚 + ボタン2枚）
+// ─────────────────────────────────────────────
+const panelParts = {}; // panelParts[index] = { board, btnL, btnR }
+
+function ensureParts(targetIndex) {
+  if (panelParts[targetIndex]) return panelParts[targetIndex];
+
+  const targetEl = document.querySelector(
+    `.lens-target[data-index="${targetIndex}"]`
+  );
+  if (!targetEl) return null;
+  const panelEl = targetEl.querySelector(".lens-panel");
+
+  // 本体
+  const board = document.createElement("a-plane");
+  board.setAttribute("width", "1");
+  board.setAttribute("height", "0.547");   // 1024:560
+  board.setAttribute("position", "0 0.12 0");
+  panelEl.appendChild(board);
+
+  // ボタン左右
+  const mkBtn = (x) => {
+    const b = document.createElement("a-plane");
+    b.setAttribute("width", "0.46");
+    b.setAttribute("height", "0.12");      // 460:120
+    b.setAttribute("position", `${x} -0.23 0.01`);
+    b.setAttribute("class", "clickable");
+    panelEl.appendChild(b);
+    return b;
+  };
+  const btnL = mkBtn(-0.25);
+  const btnR = mkBtn(0.25);
+
+  // タップされたときの処理
+  btnL.addEventListener("click", () => onButton(targetIndex, "L"));
+  btnR.addEventListener("click", () => onButton(targetIndex, "R"));
+
+  panelParts[targetIndex] = { board, btnL, btnR };
+  return panelParts[targetIndex];
+}
+
+// ── ボタンが押された ──
+function onButton(targetIndex, side) {
+  const screen = screens[targetIndex] || "home";
+
+  if (screen === "home") {
+    screens[targetIndex] = side === "L" ? "store" : "you";
+  } else {
+    // 一覧画面では左=戻る、右=もう一方へ
+    if (side === "L") {
+      screens[targetIndex] = "home";
+    } else {
+      screens[targetIndex] = screen === "store" ? "you" : "store";
+    }
+  }
+  renderPanel(targetIndex);
+}
+
+// ── 1つの看板を描画 ──
+function renderPanel(targetIndex) {
+  const store = STORES[targetIndex];
+  if (!store) return;
+
+  const parts = ensureParts(targetIndex);
+  if (!parts) return;
+
+  const profile = PROFILES.find((x) => x.key === current);
+  const screen = screens[targetIndex] || "home";
+
+  applyTexture(parts.board, drawBoard(store, profile, screen));
+
+  // ボタンのラベルは画面によって変わる
+  let labelL, labelR;
+  if (screen === "home") {
+    labelL = "お店のおすすめ";
+    labelR = "あなたの興味";
+  } else if (screen === "store") {
+    labelL = "← 戻る";
+    labelR = "あなたの興味";
+  } else {
+    labelL = "← 戻る";
+    labelR = "お店のおすすめ";
+  }
+
+  applyTexture(parts.btnL, drawButton(labelL, profile.accent, false));
+  applyTexture(parts.btnR, drawButton(labelR, profile.accent, screen === "home"));
+}
+
 function renderAllPanels() {
   STORES.forEach((_, i) => renderPanel(i));
 }
 
+// ─────────────────────────────────────────────
+// UI
+// ─────────────────────────────────────────────
 function buildChips() {
   const wrap = document.getElementById("chips");
   PROFILES.forEach((p) => {
@@ -189,9 +383,7 @@ function buildChips() {
     b.textContent = p.label;
     b.onclick = () => {
       current = p.key;
-      document
-        .querySelectorAll(".chip")
-        .forEach((c) => c.classList.remove("active"));
+      document.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
       b.classList.add("active");
       renderAllPanels();
     };
@@ -219,5 +411,5 @@ function wireTargetEvents() {
 window.addEventListener("DOMContentLoaded", () => {
   buildChips();
   wireTargetEvents();
-  startPolling(); // データを取ってきてから描画される
+  startPolling();
 });
