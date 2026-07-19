@@ -458,14 +458,23 @@ function setupTapHandling() {
     }
   };
 
-  // スマホのタッチ
+  // ── 二重発火を防ぐ ──
+  // スマホでは指を離すと touchend が発火し、その直後にブラウザが
+  // 互換性のため click も発生させる。両方拾うと1回のタップで
+  // 2回処理が走り、画面遷移が往復して「何も起きない」ように見える。
+  // → touchend を処理したら、直後の click は無視する。
+  let lastTouchAt = 0;
+
   sceneEl.addEventListener("touchend", (e) => {
     const t = e.changedTouches && e.changedTouches[0];
-    if (t) handleTap(t.clientX, t.clientY);
+    if (!t) return;
+    lastTouchAt = Date.now();
+    handleTap(t.clientX, t.clientY);
   });
 
   // PCのクリック（動作確認用）
   sceneEl.addEventListener("click", (e) => {
+    if (Date.now() - lastTouchAt < 700) return; // 直前のタッチの残響なので無視
     handleTap(e.clientX, e.clientY);
   });
 }
