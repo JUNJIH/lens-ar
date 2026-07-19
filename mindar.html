@@ -46,6 +46,53 @@
       border: 1px solid #3a3f47; transition: opacity .3s; text-align: center;
     }
     #hint.hidden { opacity: 0; }
+
+    /* ── 下部UIの行 ── */
+    #ui .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    #status { color: #7dd3fc; }
+    .mini {
+      background: transparent; border: 1px solid #3a3f47; color: #f5f5f4;
+      border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 700;
+      cursor: pointer; -webkit-tap-highlight-color: transparent;
+      font-family: inherit;
+    }
+
+    /* ── 興味の登録画面 ── */
+    #editor {
+      position: fixed; inset: 0; z-index: 20;
+      background: rgba(6,7,9,.86);
+      display: flex; align-items: flex-end; justify-content: center;
+    }
+    #editor.hidden { display: none; }
+    .sheet {
+      width: 100%; max-width: 520px; max-height: 88vh; overflow-y: auto;
+      background: #101216; color: #f5f5f4;
+      border-top-left-radius: 20px; border-top-right-radius: 20px;
+      border: 1px solid #23262b; border-bottom: none;
+      padding: 22px 18px calc(22px + env(safe-area-inset-bottom));
+    }
+    .sheet h2 { font-size: 19px; margin-bottom: 6px; }
+    .lead { font-size: 13px; color: #9ca3af; margin-bottom: 18px; line-height: 1.6; }
+    .section-label {
+      font-size: 11px; letter-spacing: .16em; color: #6b7280;
+      margin: 16px 0 10px;
+    }
+    .tags { display: flex; flex-wrap: wrap; gap: 8px; }
+    .tag {
+      padding: 10px 14px; border-radius: 999px;
+      border: 1px solid #3a3f47; background: transparent;
+      color: #f5f5f4; font-size: 14px; font-weight: 700;
+      cursor: pointer; -webkit-tap-highlight-color: transparent;
+      font-family: inherit;
+    }
+    .tag.on { background: #f5f5f4; color: #0d0f12; border-color: #f5f5f4; }
+    .actions { display: flex; gap: 10px; margin-top: 24px; }
+    .actions button {
+      flex: 1; padding: 13px; border-radius: 12px; font-size: 15px; font-weight: 700;
+      cursor: pointer; -webkit-tap-highlight-color: transparent; font-family: inherit;
+    }
+    .ghost { background: transparent; border: 1px solid #3a3f47; color: #f5f5f4; }
+    .primary { background: #f5f5f4; border: 1px solid #f5f5f4; color: #0d0f12; }
   </style>
 </head>
 <body>
@@ -73,8 +120,30 @@
   </a-scene>
 
   <div id="ui">
-    <div class="title">誰として見る？　<span id="status" style="color:#7dd3fc">起動中</span></div>
+    <div class="row">
+      <div class="title">誰として見る？　<span id="status">起動中</span></div>
+      <button id="editBtn" class="mini">興味を編集</button>
+    </div>
     <div id="chips"></div>
+  </div>
+
+  <!-- ▼ 興味の登録画面（ふだんは隠れている） -->
+  <div id="editor" class="hidden">
+    <div class="sheet">
+      <h2>あなたの興味</h2>
+      <p class="lead">当てはまるものを選んでください。看板に出る内容が変わります。</p>
+
+      <div class="section-label">好み</div>
+      <div id="tagList" class="tags"></div>
+
+      <div class="section-label">1回に使ってもいい金額</div>
+      <div id="budgetList" class="tags"></div>
+
+      <div class="actions">
+        <button id="cancelBtn" class="ghost">キャンセル</button>
+        <button id="saveBtn" class="primary">保存する</button>
+      </div>
+    </div>
   </div>
 
   <script src="mindar-app.js"></script>
