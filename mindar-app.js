@@ -1,15 +1,16 @@
 // ─────────────────────────────────────────────────────────
-// LENS mindar-app.js — 複数ターゲット対応版
+// LENS mindar-app.js — サーバーからデータを取得する版
 // ─────────────────────────────────────────────────────────
-// 一番大きな変化：
-//   前：パネル = f(見る人)
-//   今：パネル = f(看板 × 見る人)
+// 変更点：STORES をコードに直書きするのをやめ、
+//         /api/stores から取ってくるようにした。
 //
-// 看板ごとに STORES を持ち、その中に見る人ごとの内容を持つ。
-// 「どの看板か」と「誰として見るか」の掛け合わせで表示が決まる。
+//   起動時    → 1回取得して表示
+//   30秒ごと  → 取り直して、変わっていれば描き直す（ポーリング）
+//
+// Day2で検討した通り、WebSocketではなくポーリングを選択。
+// 看板にかざした瞬間だけ情報が要るので、常時接続は過剰。
 // ─────────────────────────────────────────────────────────
 
-// ── 見る人（プロフィール）の定義 ──
 const PROFILES = [
   { key: "none", label: "レンズOFF", accent: "#9ca3af" },
   { key: "a", label: "辛いの好き 24歳", accent: "#e8462d" },
@@ -17,54 +18,55 @@ const PROFILES = [
   { key: "c", label: "学生・安く 20歳", accent: "#e0a020" },
 ];
 
-// ── 看板（ターゲット）の定義 ──
-// 配列の順番 = .mind に登録した画像の順番 = targetIndex
-const STORES = [
-  {
-    name: "麺屋 こばやし",
-    views: {
-      none: {
-        headline: "麺屋 こばやし",
-        lines: ["11:00 - 23:00 営業中", "ラーメン / 一品 / ドリンク"],
-      },
-      a: {
-        headline: "あなた向けの一杯",
-        lines: ["特製辛味噌ラーメン ¥980", "替え玉2回まで無料クーポン"],
-      },
-      b: {
-        headline: "あなた向けの一皿",
-        lines: ["鶏塩あっさり ¥900", "生ビール半額(20時以降)"],
-      },
-      c: {
-        headline: "あなた向けのおトク",
-        lines: ["醤油ラーメン並 ¥650", "学割:ライス大盛り無料"],
-      },
-    },
-  },
-  {
-    name: "喫茶 ひだまり",
-    views: {
-      none: {
-        headline: "喫茶 ひだまり",
-        lines: ["8:00 - 19:00 営業中", "コーヒー / 軽食 / ケーキ"],
-      },
-      a: {
-        headline: "あなた向けの一杯",
-        lines: ["スパイスチャイ ¥580", "ジンジャー増量サービス"],
-      },
-      b: {
-        headline: "あなた向けの一皿",
-        lines: ["季節のフルーツプレート ¥880", "夜はワインも置いてます"],
-      },
-      c: {
-        headline: "あなた向けのおトク",
-        lines: ["モーニングセット ¥450", "学割:ドリンクおかわり無料"],
-      },
-    },
-  },
-];
-
 let current = "none";
+
+// サーバーから取ってきた看板データを入れる箱。最初は空。
+let STORES = [];
+
+// 前回取得したデータの中身（変化があったかの比較用）
+let lastSnapshot = "";
+
+// 通信状態（画面に出すため）
+let netState = "起動中";
+
+// ── サーバーから看板データを取得する ──
+async function fetchStores() {
+  try {
+    const res = await fetch("/api/stores");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+
+    // 中身が前回と同じなら、描き直さない（無駄な処理を省く）
+    const snapshot = JSON.stringify(data.stores);
+    if (snapshot === lastSnapshot) {
+      netState = "更新なし";
+      updateStatus();
+      return;
+    }
+
+    lastSnapshot = snapshot;
+    STORES = data.stores;
+    netState = "更新あり";
+    renderAllPanels();
+    updateStatus();
+  } catch (e) {
+    // 通信に失敗しても、前回のデータで表示は続ける（壊れない）
+    console.error("取得失敗:", e);
+    netState = "通信エラー";
+    updateStatus();
+  }
+}
+
+// ── ポーリング開始（30秒ごとに取り直す） ──
+function startPolling() {
+  fetchStores(); // まず1回
+  setInterval(fetchStores, 30000); // 以後30秒ごと
+}
+
+function updateStatus() {
+  const el = document.getElementById("status");
+  if (el) el.textContent = netState;
+}
 
 // ── canvasにパネルを描く ──
 function drawPanelCanvas(store, profile) {
@@ -86,7 +88,6 @@ function drawPanelCanvas(store, profile) {
 
   let topY = 90;
 
-  // どの看板かを小さく表示（複数対応したので識別できると分かりやすい）
   ctx.fillStyle = "#6b7280";
   ctx.font = "28px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
   ctx.textAlign = "left";
@@ -131,8 +132,6 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-// ── 看板ごとに板を1枚ずつ用意しておく ──
-// boards[targetIndex] = a-plane要素
 const boards = [];
 
 function ensureBoard(targetIndex) {
@@ -141,11 +140,12 @@ function ensureBoard(targetIndex) {
   const targetEl = document.querySelector(
     `.lens-target[data-index="${targetIndex}"]`
   );
-  const panelEl = targetEl.querySelector(".lens-panel");
+  if (!targetEl) return null; // HTMLに枠が無ければ何もしない
 
+  const panelEl = targetEl.querySelector(".lens-panel");
   const board = document.createElement("a-plane");
   board.setAttribute("width", "1");
-  board.setAttribute("height", "0.625"); // 1024:640 の比率
+  board.setAttribute("height", "0.625");
   board.setAttribute("position", "0 0 0");
   panelEl.appendChild(board);
 
@@ -153,14 +153,14 @@ function ensureBoard(targetIndex) {
   return board;
 }
 
-// ── 1枚分のパネルを描いて貼る ──
 function renderPanel(targetIndex) {
   const store = STORES[targetIndex];
-  if (!store) return; // .mindに登録が無ければ何もしない
+  if (!store) return;
 
   const profile = PROFILES.find((x) => x.key === current);
   const canvas = drawPanelCanvas(store, profile);
   const board = ensureBoard(targetIndex);
+  if (!board) return;
 
   const apply = () => {
     const mesh = board.getObject3D("mesh");
@@ -177,12 +177,10 @@ function renderPanel(targetIndex) {
   apply();
 }
 
-// ── 全ての看板を描き直す（プロフィール切り替え時） ──
 function renderAllPanels() {
   STORES.forEach((_, i) => renderPanel(i));
 }
 
-// ── プロフィール切り替えチップUI ──
 function buildChips() {
   const wrap = document.getElementById("chips");
   PROFILES.forEach((p) => {
@@ -195,13 +193,12 @@ function buildChips() {
         .querySelectorAll(".chip")
         .forEach((c) => c.classList.remove("active"));
       b.classList.add("active");
-      renderAllPanels(); // 全看板を描き直す
+      renderAllPanels();
     };
     wrap.appendChild(b);
   });
 }
 
-// ── 認識イベント（看板ごとに監視） ──
 function wireTargetEvents() {
   const hint = document.getElementById("hint");
   const found = new Set();
@@ -214,7 +211,6 @@ function wireTargetEvents() {
     });
     el.addEventListener("targetLost", () => {
       found.delete(idx);
-      // どの看板も見えなくなったときだけヒントを戻す
       if (found.size === 0) hint.classList.remove("hidden");
     });
   });
@@ -222,6 +218,6 @@ function wireTargetEvents() {
 
 window.addEventListener("DOMContentLoaded", () => {
   buildChips();
-  renderAllPanels();
   wireTargetEvents();
+  startPolling(); // データを取ってきてから描画される
 });
