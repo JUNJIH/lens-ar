@@ -35,7 +35,59 @@ const PROFILES = [
   },
 ];
 
-let current = "none";
+// ── 自分のプロフィール（端末に保存される） ──
+// 決め打ちの4つに加えて、本人が登録した「自分」を持てるようにする。
+// 保存先は localStorage（このブラウザの中だけ。サーバーには送らない）。
+const STORAGE_KEY = "lens.myProfile";
+
+// 選べる興味タグの一覧。店のメニューに付いているタグと揃える。
+const ALL_TAGS = [
+  "辛い", "こってり", "あっさり", "ヘルシー",
+  "甘い", "スパイス", "酒", "酒に合う",
+  "安い", "定番", "学割", "軽食", "一品", "麺",
+];
+
+const BUDGET_OPTIONS = [
+  { label: "〜800円", value: 800 },
+  { label: "〜1200円", value: 1200 },
+  { label: "〜2000円", value: 2000 },
+  { label: "気にしない", value: 99999 },
+];
+
+// 保存された自分の設定を読み込む
+function loadMyProfile() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw);
+    return {
+      key: "me",
+      label: "自分",
+      accent: "#7dd3fc",
+      interests: saved.interests || [],
+      budget: saved.budget ?? 1200,
+    };
+  } catch (e) {
+    console.error("設定の読み込みに失敗:", e);
+    return null;
+  }
+}
+
+function saveMyProfile(interests, budget) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ interests, budget }));
+    return true;
+  } catch (e) {
+    console.error("設定の保存に失敗:", e);
+    return false;
+  }
+}
+
+// 起動時に読み込んで、あれば先頭に差し込む
+const myProfile = loadMyProfile();
+if (myProfile) PROFILES.splice(1, 0, myProfile);
+
+let current = myProfile ? "me" : "none";
 let STORES = [];
 let lastSnapshot = "";
 let netState = "起動中";
@@ -479,8 +531,99 @@ function setupTapHandling() {
   });
 }
 
+// ─────────────────────────────────────────────
+// 興味の登録画面
+// ─────────────────────────────────────────────
+function setupEditor() {
+  const editor = document.getElementById("editor");
+  const tagList = document.getElementById("tagList");
+  const budgetList = document.getElementById("budgetList");
+
+  // 編集中の状態（保存を押すまで確定しない）
+  let draftTags = [];
+  let draftBudget = 1200;
+
+  const renderTags = () => {
+    tagList.innerHTML = "";
+    ALL_TAGS.forEach((tag) => {
+      const b = document.createElement("button");
+      b.className = "tag" + (draftTags.includes(tag) ? " on" : "");
+      b.textContent = tag;
+      b.onclick = () => {
+        if (draftTags.includes(tag)) {
+          draftTags = draftTags.filter((t) => t !== tag);
+        } else {
+          draftTags.push(tag);
+        }
+        renderTags();
+      };
+      tagList.appendChild(b);
+    });
+  };
+
+  const renderBudget = () => {
+    budgetList.innerHTML = "";
+    BUDGET_OPTIONS.forEach((opt) => {
+      const b = document.createElement("button");
+      b.className = "tag" + (draftBudget === opt.value ? " on" : "");
+      b.textContent = opt.label;
+      b.onclick = () => {
+        draftBudget = opt.value;
+        renderBudget();
+      };
+      budgetList.appendChild(b);
+    });
+  };
+
+  const open = () => {
+    // 今の「自分」設定を編集用に読み込む
+    const me = PROFILES.find((p) => p.key === "me");
+    draftTags = me ? [...me.interests] : [];
+    draftBudget = me ? me.budget : 1200;
+    renderTags();
+    renderBudget();
+    editor.classList.remove("hidden");
+  };
+
+  const close = () => editor.classList.add("hidden");
+
+  document.getElementById("editBtn").onclick = open;
+  document.getElementById("cancelBtn").onclick = close;
+
+  document.getElementById("saveBtn").onclick = () => {
+    if (!saveMyProfile(draftTags, draftBudget)) {
+      alert("保存できませんでした");
+      return;
+    }
+    // PROFILES を更新（あれば書き換え、なければ差し込む）
+    const idx = PROFILES.findIndex((p) => p.key === "me");
+    const me = {
+      key: "me",
+      label: "自分",
+      accent: "#7dd3fc",
+      interests: draftTags,
+      budget: draftBudget,
+    };
+    if (idx >= 0) PROFILES[idx] = me;
+    else PROFILES.splice(1, 0, me);
+
+    current = "me";
+    rebuildChips();
+    renderAllPanels();
+    close();
+  };
+}
+
+// チップを作り直す（「自分」が増えた時などに使う）
+function rebuildChips() {
+  const wrap = document.getElementById("chips");
+  wrap.innerHTML = "";
+  buildChips();
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   buildChips();
+  setupEditor();
   wireTargetEvents();
   setupTapHandling();
   startPolling();
