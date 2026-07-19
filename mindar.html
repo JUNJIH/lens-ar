@@ -7,16 +7,14 @@
 
   <!--
     ─────────────────────────────────────────────────────────
-    LENS 第三段階：画像認識（MindAR）
+    LENS 第三段階：画像認識（MindAR）＋ 複数ターゲット対応
     ─────────────────────────────────────────────────────────
-    hiroマーカー版（index.html）との違い：
-      - AR.js  → 白黒の専用マーカーを認識
-      - MindAR → 実在の画像そのものを認識（機械学習ベース）
+    変更点：認識対象を2つに増やした。
+      - targetIndex: 0 → 1枚目の画像
+      - targetIndex: 1 → 2枚目の画像
+    .mind ファイルに登録した順番が、そのまま index になる。
 
-    今回はまず動作確認のため、MindAR公式のサンプル画像
-    （card.mind）を認識対象にしている。
-    自分の看板を認識させたくなったら、写真から .mind ファイルを
-    作って差し替えるだけでよい。
+    パネルの中身は「看板 × 見る人」の掛け合わせで決まる。
     ─────────────────────────────────────────────────────────
   -->
 
@@ -50,16 +48,14 @@
       border: 1px solid #3a3f47; transition: opacity .3s; text-align: center;
     }
     #hint.hidden { opacity: 0; }
-    #hint a { color: #7dd3fc; }
   </style>
 </head>
 <body>
 
   <div id="hint">対象の画像にカメラを向けてください</div>
 
-  <!-- ▼ MindARのシーン。imageTargetSrc に認識対象ファイルを指定 -->
   <a-scene
-    mindar-image="imageTargetSrc: ./targets.mind; autoStart: true; uiLoading: no; uiError: no; uiScanning: no;"
+    mindar-image="imageTargetSrc: ./targets.mind; autoStart: true; uiLoading: no; uiError: no; uiScanning: no; maxTrack: 2;"
     color-space="sRGB"
     renderer="colorManagement: true, physicallyCorrectLights"
     vr-mode-ui="enabled: false"
@@ -67,9 +63,14 @@
   >
     <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-    <!-- ▼ 認識対象0番。認識されるとこの中身が表示される -->
-    <a-entity id="target" mindar-image-target="targetIndex: 0">
-      <a-entity id="panel"></a-entity>
+    <!-- ▼ 認識対象 0番 -->
+    <a-entity class="lens-target" data-index="0" mindar-image-target="targetIndex: 0">
+      <a-entity class="lens-panel"></a-entity>
+    </a-entity>
+
+    <!-- ▼ 認識対象 1番 -->
+    <a-entity class="lens-target" data-index="1" mindar-image-target="targetIndex: 1">
+      <a-entity class="lens-panel"></a-entity>
     </a-entity>
   </a-scene>
 
