@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>LENS 生活実験モード</title>
+
+  <!--
+    ─────────────────────────────────────────────────────────
+    LENS 生活実験モード（Phase 1）
+    ─────────────────────────────────────────────────────────
+    家の中の場所を認識して、自分の情報（期限・タスク等）を出す。
+    頭部固定で使うので「見るだけ」に徹する（タップUIは置かない）。
+    性能パラメータはDay3で調整した値（Galaxy A41向け・速さ優先）。
+    ─────────────────────────────────────────────────────────
+  -->
+
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Hiragino Kaku Gothic ProN','Noto Sans JP',system-ui,sans-serif; overflow: hidden; }
+    #status-bar {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+      padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+      background: linear-gradient(180deg, rgba(13,15,18,0), rgba(13,15,18,0.85) 60%);
+      color: #cbd5e1; font-size: 12px; letter-spacing: .1em;
+    }
+    #status { color: #7dd3fc; }
+    #hint {
+      position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+      z-index: 10; background: rgba(13,15,18,.82); color: #f5f5f4;
+      padding: 10px 16px; border-radius: 999px; font-size: 13px;
+      border: 1px solid #3a3f47; transition: opacity .3s; text-align: center;
+    }
+    #hint.hidden { opacity: 0; }
+  </style>
+</head>
+<body>
+
+  <div id="hint">場所にカメラを向けてください</div>
+
+  <a-scene
+    mindar-image="imageTargetSrc: ./life.mind; autoStart: true; uiLoading: no; uiError: no; uiScanning: no;
+                  maxTrack: 1; warmupTolerance: 1; missTolerance: 8;
+                  filterMinCF: 0.005; filterBeta: 5000;"
+    color-space="sRGB"
+    renderer="colorManagement: true, physicallyCorrectLights"
+    vr-mode-ui="enabled: false"
+    device-orientation-permission-ui="enabled: false"
+  >
+    <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+    <a-entity class="lens-target" data-index="0" mindar-image-target="targetIndex: 0">
+      <a-entity class="lens-panel"></a-entity>
+    </a-entity>
+    <a-entity class="lens-target" data-index="1" mindar-image-target="targetIndex: 1">
+      <a-entity class="lens-panel"></a-entity>
+    </a-entity>
+    <a-entity class="lens-target" data-index="2" mindar-image-target="targetIndex: 2">
+      <a-entity class="lens-panel"></a-entity>
+    </a-entity>
+  </a-scene>
+
+  <div id="status-bar">LENS 生活実験　通信：<span id="status">起動中</span></div>
+
+  <script src="life-app.js"></script>
+</body>
+</html>
