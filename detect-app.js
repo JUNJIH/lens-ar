@@ -24,7 +24,7 @@ const INFO_BY_LABEL = {
 
 const MIN_SCORE = 0.5;        // 検出を採用する最低スコア
 const KEEP_MS = 700;          // 見失っても、この時間は枠を保持する
-const SMOOTH = 0.35;          // 枠の追従の滑らかさ（0=止まる 1=即移動）
+const SMOOTH = 0.18;        // 枠の追従。描画60fpsに合わせ、より滑らかに
 
 let model = null;
 const video = document.getElementById("cam");
@@ -128,19 +128,37 @@ function draw() {
   });
 }
 
+// ─────────────────────────────────────────────
+// 検出と描画を分離する（カクつき対策の肝）
+// ─────────────────────────────────────────────
+// 描画ループ：毎フレーム(60fps)回す。軽いので滑らか。
+// 検出ループ：裏でゆっくり回す。重くても描画に影響しない。
+// → 検出の遅さが画面のカクつきになるのを防ぐ。
+// ─────────────────────────────────────────────
+
 let lastT = performance.now();
 
+// 【描画ループ】止まらず毎フレーム回る。tracked(記憶)を滑らかに描くだけ。
+function renderLoop() {
+  draw();
+  const now = performance.now();
+  fpsEl.textContent = "描画 " + Math.round(1000 / (now - lastT)) + " fps";
+  lastT = now;
+  requestAnimationFrame(renderLoop);
+}
+
+// 【検出ループ】裏で回す。1回終わったら次を始める（詰まらせない）。
 async function detectLoop() {
   if (model && video.readyState === 4) {
-    const predictions = await model.detect(video);
-    updateTracked(predictions);
-    draw();
-
-    const now = performance.now();
-    fpsEl.textContent = Math.round(1000 / (now - lastT)) + " fps";
-    lastT = now;
+    try {
+      const predictions = await model.detect(video);
+      updateTracked(predictions);
+    } catch (e) {
+      console.error("検出エラー:", e);
+    }
   }
-  requestAnimationFrame(detectLoop);
+  // 少し間隔を空けて次の検出（端末に余裕を持たせる）
+  setTimeout(detectLoop, 120);
 }
 
 (async function main() {
@@ -151,7 +169,8 @@ async function detectLoop() {
     await loadModel();
     hint.textContent = "モノにカメラを向けてください";
     setTimeout(() => (hint.style.opacity = "0"), 3000);
-    detectLoop();
+    renderLoop();  // 描画は即開始（滑らかに）
+    detectLoop();  // 検出は裏で開始
   } catch (e) {
     hint.textContent = "エラー: " + e.message;
     console.error(e);
