@@ -26,7 +26,10 @@ const INFO_BY_LABEL = {
 const MIN_SCORE = 0.5;
 const KEEP_MS = 800;
 const SMOOTH = 0.18;
-const DETECT_INTERVAL = 100; // 何msごとにWorkerへ画像を送るか
+const DETECT_INTERVAL = 200;   // 何msごとにWorkerへ画像を送るか（頻度を半分に）
+const DETECT_WIDTH = 480;      // 検出用に縮小する幅（小さいほど軽い）
+let scaleRatio = 1;            // 縮小率（枠の座標を元サイズに戻すのに使う）
+let scratch = null;           // 縮小用の作業キャンバス（使い回す）
 
 const video = document.getElementById("cam");
 const overlay = document.getElementById("overlay");
@@ -82,8 +85,15 @@ function updateTracked(predictions) {
   const now = performance.now();
   predictions.forEach((p) => {
     if (p.score < MIN_SCORE) return;
+    // Workerには縮小画像を送ったので、枠を元の映像サイズに戻す
+    const box = [
+      p.bbox[0] / scaleRatio,
+      p.bbox[1] / scaleRatio,
+      p.bbox[2] / scaleRatio,
+      p.bbox[3] / scaleRatio,
+    ];
     const prev = tracked[p.class];
-    tracked[p.class] = { bbox: p.bbox, score: p.score, lastSeen: now, shown: prev ? prev.shown : p.bbox };
+    tracked[p.class] = { bbox: box, score: p.score, lastSeen: now, shown: prev ? prev.shown : box };
   });
   Object.keys(tracked).forEach((label) => {
     if (now - tracked[label].lastSeen > KEEP_MS) delete tracked[label];
@@ -123,14 +133,27 @@ function draw() {
   });
 }
 
-// ── 映像を切り出してWorkerへ送る（定期）──
+// ── 映像を縮小して切り出し、Workerへ送る（定期）──
+// 検出には高解像度は要らない。小さく縮小してから送ることで
+// 「切り出し・送信・検出」すべてを軽くする。
+// 縮小率(scaleRatio)を覚えておき、返ってきた枠を元サイズに戻す。
 async function sendFrame() {
   if (workerReady && !sending && video.readyState === 4) {
     sending = true;
     try {
-      // 映像から画像を切り出す（軽い処理）
-      const bitmap = await createImageBitmap(video);
-      // bitmapの所有権をWorkerへ渡す（コピーせず高速）
+      // 作業キャンバスを一度だけ用意
+      if (!scratch) {
+        scaleRatio = DETECT_WIDTH / video.videoWidth;
+        scratch = document.createElement("canvas");
+        scratch.width = DETECT_WIDTH;
+        scratch.height = Math.round(video.videoHeight * scaleRatio);
+      }
+      // 縮小して描く（この描画自体は小さいので軽い）
+      const sctx = scratch.getContext("2d");
+      sctx.drawImage(video, 0, 0, scratch.width, scratch.height);
+
+      // 縮小済みキャンバスから画像を作ってWorkerへ（所有権ごと渡す）
+      const bitmap = await createImageBitmap(scratch);
       worker.postMessage({ type: "frame", bitmap }, [bitmap]);
     } catch (e) {
       console.error("フレーム送信エラー:", e);
