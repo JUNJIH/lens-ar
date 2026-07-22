@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>LENS English — 部屋が単語帳になる</title>
+
+  <!--
+    ─────────────────────────────────────────────────────────
+    LENS English（英単語学習モード）
+    ─────────────────────────────────────────────────────────
+    部屋の中の物体を認識し、その英単語を出す。
+    声に出して正しく言えたら消える＝見て・思い出して・発音する の一周。
+
+    2モード：
+      LEARN（覚える）… 単語を表示。読み上げ練習
+      QUIZ （試す）  … 単語を隠す。思い出して答える
+
+    技術：
+      物体認識 … COCO-SSD（Worker内。detect-worker.jsを再利用）
+      音声認識 … Web Speech API（ブラウザ標準。追加ライブラリ不要）
+    ─────────────────────────────────────────────────────────
+  -->
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Hiragino Kaku Gothic ProN','Noto Sans JP',system-ui,sans-serif;
+      overflow: hidden; background: #000; color: #f5f5f4;
+    }
+    #stage { position: fixed; inset: 0; }
+    #cam { width: 100%; height: 100%; object-fit: cover; }
+    #overlay { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+    /* 上部：モード切替とスコア */
+    #topbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+      display: flex; align-items: center; gap: 10px;
+      padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
+      background: linear-gradient(180deg, rgba(13,15,18,0.9), rgba(13,15,18,0));
+    }
+    .mode-btn {
+      padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 700;
+      border: 1px solid #3a3f47; background: rgba(28,31,36,.85); color: #f5f5f4;
+      font-family: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent;
+    }
+    .mode-btn.active { background: #f5f5f4; color: #0d0f12; border-color: #f5f5f4; }
+    #score { margin-left: auto; font-size: 14px; font-weight: 700; color: #7dd3fc; }
+
+    /* 下部：マイクの状態と聞き取り結果 */
+    #bottombar {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+      padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
+      background: linear-gradient(180deg, rgba(13,15,18,0), rgba(13,15,18,0.92) 40%);
+      display: flex; align-items: center; gap: 12px;
+    }
+    #micBtn {
+      flex: 0 0 auto; width: 56px; height: 56px; border-radius: 50%;
+      border: 2px solid #3a3f47; background: rgba(28,31,36,.9); color: #f5f5f4;
+      font-size: 22px; cursor: pointer; -webkit-tap-highlight-color: transparent;
+    }
+    #micBtn.on { background: #e8462d; border-color: #e8462d; }
+    #heard { flex: 1; font-size: 14px; color: #cbd5e1; min-height: 1.4em; }
+    #heard b { color: #7dd3fc; }
+
+    #toast {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      z-index: 20; padding: 18px 30px; border-radius: 16px;
+      background: rgba(13,15,18,.92); border: 2px solid #37b58a;
+      font-size: 26px; font-weight: 800; color: #37b58a;
+      opacity: 0; transition: opacity .25s; pointer-events: none;
+    }
+    #toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <div id="stage">
+    <video id="cam" autoplay muted playsinline></video>
+    <canvas id="overlay"></canvas>
+  </div>
+
+  <div id="topbar">
+    <button class="mode-btn active" id="learnBtn">覚える</button>
+    <button class="mode-btn" id="quizBtn">試す</button>
+    <span id="score">正解 0</span>
+  </div>
+
+  <div id="toast">Good!</div>
+
+  <div id="bottombar">
+    <button id="micBtn">🎤</button>
+    <div id="heard">マイクを押して、見えているものを英語で言ってください</div>
+  </div>
+
+  <script src="english-app.js"></script>
+</body>
+</html>
