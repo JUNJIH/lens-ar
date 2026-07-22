@@ -167,6 +167,32 @@ function draw() {
       ctx.fillText(hint, x + 13, y + h + 38);
     }
   });
+
+  drawDebug();
+}
+
+// ── デバッグ表示：今この瞬間の「正解になる単語」を出す ──
+// 照合が合わないときに、何を言えばいいかを目で確認するため。
+let debugOn = true;
+
+function drawDebug() {
+  if (!debugOn) return;
+  const targets = Object.keys(tracked).filter((l) => !cleared.has(l));
+
+  const x = 20, y = overlay.height - 40 - targets.length * 34;
+  ctx.fillStyle = "rgba(13,15,18,0.8)";
+  ctx.fillRect(x, y - 34, 560, targets.length * 34 + 46);
+
+  ctx.fillStyle = "#e0a020";
+  ctx.font = "bold 24px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText("いま正解になる単語：", x + 12, y - 8);
+
+  ctx.fillStyle = "#f5f5f4";
+  ctx.font = "26px 'Hiragino Kaku Gothic ProN',monospace,sans-serif";
+  targets.forEach((label, i) => {
+    ctx.fillText("・" + label, x + 20, y + 26 + i * 34);
+  });
 }
 
 let lastT = performance.now();
@@ -238,14 +264,49 @@ function stopListening() {
   heardEl.textContent = "マイクを押して、見えているものを英語で言ってください";
 }
 
+// ── 聞き取った言葉を照合しやすい形に整える ──
+// 音声認識は "The refrigerator." のように冠詞・大文字・句読点を付けて返す。
+// そのままだと単純比較で外れるので、正規化してから照合する。
+function normalize(str) {
+  return str
+    .toLowerCase()
+    .replace(/[.,!?;:'"]/g, " ")  // 句読点を空白に
+    .replace(/\s+/g, " ")         // 連続空白をまとめる
+    .trim();
+}
+
 // ── 聞き取った言葉が、今見えている単語と一致するか ──
-function checkAnswer(text) {
+function checkAnswer(rawText) {
+  const text = normalize(rawText);
+
   Object.keys(tracked).forEach((label) => {
     if (cleared.has(label)) return;
-    // ラベルは "cell phone" のように複数語のこともある
-    if (text.includes(label)) {
-      correct(label);
+
+    const target = normalize(label);
+
+    // 判定を緩くする：完全一致でなくても、以下のいずれかで正解
+    //   ・聞き取り文の中に単語が含まれる（"the refrigerator" → OK）
+    //   ・複数形で言った（"books" → "book"）
+    //   ・複数語ラベルは、最後の語だけでも可（"cell phone" → "phone"）
+    const candidates = [target];
+
+    // 複数形（s / es）を許容
+    candidates.push(target + "s", target + "es");
+
+    // 複数語ラベルなら最後の語も候補に
+    const parts = target.split(" ");
+    if (parts.length > 1) {
+      candidates.push(parts[parts.length - 1]);
+      candidates.push(parts[parts.length - 1] + "s");
     }
+
+    const hit = candidates.some((c) => {
+      // 単語単位で含まれるかを見る（部分文字列の誤爆を避ける）
+      const re = new RegExp("(^|\\s)" + c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "($|\\s)");
+      return re.test(text);
+    });
+
+    if (hit) correct(label);
   });
 }
 
