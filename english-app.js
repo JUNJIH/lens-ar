@@ -179,19 +179,47 @@ function drawDebug() {
   if (!debugOn) return;
   const targets = Object.keys(tracked).filter((l) => !cleared.has(l));
 
-  const x = 20, y = overlay.height - 40 - targets.length * 34;
-  ctx.fillStyle = "rgba(13,15,18,0.8)";
-  ctx.fillRect(x, y - 34, 560, targets.length * 34 + 46);
+  const pad = 14;
+  const lineH = 34;
+  const boxW = Math.min(overlay.width - 40, 900);
+  const rows = targets.length + heardLog.length + 3;
+  const boxH = rows * lineH + pad * 2;
+  const x = 20;
+  const y = overlay.height - boxH - 30;
 
+  ctx.fillStyle = "rgba(13,15,18,0.88)";
+  ctx.fillRect(x, y, boxW, boxH);
+  ctx.strokeStyle = "#3a3f47";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x, y, boxW, boxH);
+
+  let cy = y + pad + 26;
+  ctx.textAlign = "left";
+
+  // 正解になる単語
   ctx.fillStyle = "#e0a020";
   ctx.font = "bold 24px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
-  ctx.textAlign = "left";
-  ctx.fillText("いま正解になる単語：", x + 12, y - 8);
+  ctx.fillText("いま正解になる単語", x + 16, cy);
+  cy += lineH;
 
   ctx.fillStyle = "#f5f5f4";
-  ctx.font = "26px 'Hiragino Kaku Gothic ProN',monospace,sans-serif";
-  targets.forEach((label, i) => {
-    ctx.fillText("・" + label, x + 20, y + 26 + i * 34);
+  ctx.font = "26px monospace";
+  targets.forEach((label) => {
+    ctx.fillText("  " + label, x + 16, cy);
+    cy += lineH;
+  });
+
+  // 聞き取った言葉
+  ctx.fillStyle = "#7dd3fc";
+  ctx.font = "bold 24px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
+  ctx.fillText("聞き取った言葉（●確定 ○途中）", x + 16, cy);
+  cy += lineH;
+
+  ctx.font = "24px monospace";
+  heardLog.forEach((t, i) => {
+    ctx.fillStyle = i === 0 ? "#f5f5f4" : "#6b7280";
+    ctx.fillText("  " + t, x + 16, cy);
+    cy += lineH;
   });
 }
 
@@ -210,6 +238,11 @@ function renderLoop() {
 let recognition = null;
 let listening = false;
 
+// ── デバッグ用：聞き取った言葉の履歴を保持 ──
+// 画面に大きく出して、何が認識されているかを確実に見えるようにする。
+const heardLog = [];        // 直近の聞き取り結果
+let lastCompare = "";       // 最後に行った照合の内容
+
 function setupSpeech() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) {
@@ -225,11 +258,18 @@ function setupSpeech() {
 
   recognition.onresult = (e) => {
     let text = "";
+    let isFinal = false;
     for (let i = e.resultIndex; i < e.results.length; i++) {
       text += e.results[i][0].transcript;
+      if (e.results[i].isFinal) isFinal = true;
     }
-    text = text.toLowerCase().trim();
+    text = text.trim();
     heardEl.innerHTML = "聞き取り：<b>" + text + "</b>";
+
+    // 履歴に積む（画面に大きく出す用）。最新5件を保持。
+    heardLog.unshift((isFinal ? "● " : "○ ") + text);
+    if (heardLog.length > 5) heardLog.pop();
+
     checkAnswer(text);
   };
 
@@ -278,6 +318,8 @@ function normalize(str) {
 // ── 聞き取った言葉が、今見えている単語と一致するか ──
 function checkAnswer(rawText) {
   const text = normalize(rawText);
+  const targets = Object.keys(tracked).filter((l) => !cleared.has(l));
+  lastCompare = `聞:"${text}" ⇔ 対象:[${targets.join(", ")}]`;
 
   Object.keys(tracked).forEach((label) => {
     if (cleared.has(label)) return;
