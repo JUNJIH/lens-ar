@@ -23,6 +23,116 @@ const INFO_BY_LABEL = {
   "potted plant": { jp: "観葉植物", lines: ["水やり 2日に1回"] },
 };
 
+// ─────────────────────────────────────────────────────────
+// 場所の判定（モノの組み合わせから場所を推定する）
+// ─────────────────────────────────────────────────────────
+// COCO-SSDが認識できるのは「モノ」80種類。「キッチン」「玄関」は
+// 場所なのでリストに無い＝単体では認識できない。
+//
+// そこで人間と同じ判断をする：
+//   シンクがあって、冷蔵庫があって、電子レンジがある → ここはキッチンだ
+//
+// 各場所に「手がかりのモノ」と重みを持たせ、今見えているモノと
+// 照合して点数をつける。しきい値を超えたらその場所だと判定する。
+//
+// ※ 玄関は現状保留。80種類に玄関らしいモノがほとんど無く、
+//   誤認識が多いため。手がかりが見つかったらここに足せば動く。
+// ─────────────────────────────────────────────────────────
+const PLACE_RULES = [
+  {
+    id: "kitchen",
+    name: "キッチン",
+    // モノ : 重み（そのモノがどれだけ「ここらしさ」を示すか）
+    clues: {
+      sink: 3,
+      oven: 3,
+      microwave: 3,
+      refrigerator: 2,
+      bottle: 1,
+      cup: 1,
+      bowl: 1,
+      "wine glass": 1,
+      knife: 1,
+      spoon: 1,
+    },
+    threshold: 4, // この点数以上で「キッチン」と判定
+    items: [
+      { text: "生ゴミ 今夜まとめる", level: "todo" },
+      { text: "水筒を洗って乾かす", level: "todo" },
+      { text: "米 残りわずか（次回購入）", level: "warn" },
+    ],
+  },
+  // ここに玄関やリビングを足せば、そのまま動く
+];
+
+const LEVEL_COLOR = { warn: "#e8462d", todo: "#e0a020", info: "#7dd3fc" };
+
+// 場所の判定結果（ちらつき防止のため保持する）
+let currentPlace = null;
+let placeLastSeen = 0;
+const PLACE_KEEP_MS = 3000; // 判定は3秒保持する（モノが一瞬外れても場所は変わらない）
+
+// 今見えているモノから場所を判定する
+function judgePlace() {
+  const visible = Object.keys(tracked);
+  let best = null;
+  let bestScore = 0;
+
+  PLACE_RULES.forEach((rule) => {
+    let score = 0;
+    visible.forEach((label) => {
+      if (rule.clues[label]) score += rule.clues[label];
+    });
+    if (score >= rule.threshold && score > bestScore) {
+      best = rule;
+      bestScore = score;
+    }
+  });
+
+  const now = performance.now();
+  if (best) {
+    currentPlace = { rule: best, score: bestScore };
+    placeLastSeen = now;
+  } else if (now - placeLastSeen > PLACE_KEEP_MS) {
+    // しばらく手がかりが無ければ場所判定を解除
+    currentPlace = null;
+  }
+}
+
+// 場所パネルを画面上部に描く（モノの枠とは別レイヤー）
+function drawPlacePanel() {
+  if (!currentPlace) return;
+  const { rule, score } = currentPlace;
+
+  const x = 30, y = 30, w = 620;
+  const h = 90 + rule.items.length * 52;
+
+  ctx.fillStyle = "rgba(13,15,18,0.88)";
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = "#7dd3fc";
+  ctx.fillRect(x, y, 8, h);
+
+  ctx.fillStyle = "#7dd3fc";
+  ctx.font = "bold 40px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText(`ここは ${rule.name}`, x + 26, y + 56);
+
+  ctx.fillStyle = "#6b7280";
+  ctx.font = "24px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
+  ctx.fillText(`確からしさ ${score}`, x + w - 160, y + 56);
+
+  rule.items.forEach((item, i) => {
+    const iy = y + 108 + i * 52;
+    ctx.fillStyle = LEVEL_COLOR[item.level] || "#9ca3af";
+    ctx.beginPath();
+    ctx.arc(x + 38, iy - 10, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#f5f5f4";
+    ctx.font = "30px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
+    ctx.fillText(item.text, x + 60, iy);
+  });
+}
+
 const MIN_SCORE = 0.5;
 const KEEP_MS = 800;
 const SMOOTH = 0.18;
@@ -102,6 +212,10 @@ function updateTracked(predictions) {
 
 function draw() {
   ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+  // モノの組み合わせから場所を判定する
+  judgePlace();
+
   Object.keys(tracked).forEach((label) => {
     const t = tracked[label];
     t.shown = lerpBox(t.shown, t.bbox, SMOOTH);
@@ -131,6 +245,9 @@ function draw() {
       info.lines.forEach((line, i) => ctx.fillText("・" + line, x + 22, py + 40 + i * 46));
     }
   });
+
+  // 場所パネルは最後に描く（モノの枠より手前に出す）
+  drawPlacePanel();
 }
 
 // ── 映像を縮小して切り出し、Workerへ送る（定期）──
