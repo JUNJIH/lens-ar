@@ -182,7 +182,7 @@ function drawDebug() {
   const pad = 14;
   const lineH = 34;
   const boxW = Math.min(overlay.width - 40, 900);
-  const rows = targets.length + heardLog.length + 3;
+  const rows = targets.length + heardLog.length + stateLog.length + 4;
   const boxH = rows * lineH + pad * 2;
   const x = 20;
   const y = overlay.height - boxH - 30;
@@ -216,8 +216,26 @@ function drawDebug() {
   cy += lineH;
 
   ctx.font = "24px monospace";
+  if (heardLog.length === 0) {
+    ctx.fillStyle = "#6b7280";
+    ctx.fillText("  （まだ何も聞き取れていません）", x + 16, cy);
+    cy += lineH;
+  }
   heardLog.forEach((t, i) => {
     ctx.fillStyle = i === 0 ? "#f5f5f4" : "#6b7280";
+    ctx.fillText("  " + t, x + 16, cy);
+    cy += lineH;
+  });
+
+  // 音声認識の状態
+  ctx.fillStyle = "#37b58a";
+  ctx.font = "bold 24px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
+  ctx.fillText("音声認識の状態", x + 16, cy);
+  cy += lineH;
+
+  ctx.font = "22px monospace";
+  ctx.fillStyle = "#9ca3af";
+  stateLog.forEach((t) => {
     ctx.fillText("  " + t, x + 16, cy);
     cy += lineH;
   });
@@ -242,6 +260,14 @@ let listening = false;
 // 画面に大きく出して、何が認識されているかを確実に見えるようにする。
 const heardLog = [];        // 直近の聞き取り結果
 let lastCompare = "";       // 最後に行った照合の内容
+const stateLog = [];        // 音声認識の状態変化（起動/終了/エラー）
+
+function logState(msg) {
+  const t = new Date().toLocaleTimeString("ja-JP", { hour12: false });
+  stateLog.unshift(t + " " + msg);
+  if (stateLog.length > 4) stateLog.pop();
+  console.log("[speech]", msg);
+}
 
 function setupSpeech() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -273,9 +299,15 @@ function setupSpeech() {
     checkAnswer(text);
   };
 
+  recognition.onstart = () => logState("開始");
+  recognition.onaudiostart = () => logState("音声入力 開始");
+  recognition.onspeechstart = () => logState("発話を検知");
+  recognition.onspeechend = () => logState("発話の終わりを検知");
+  recognition.onnomatch = () => logState("一致する語なし");
+
   recognition.onerror = (e) => {
-    console.error("音声認識エラー:", e.error);
-    if (e.error === "not-allowed") {
+    logState("エラー: " + e.error);
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
       heardEl.textContent = "マイクの使用が許可されていません";
       stopListening();
     }
@@ -283,21 +315,53 @@ function setupSpeech() {
 
   // 自動で止まったら、リスニング中なら再開する
   recognition.onend = () => {
+    logState("終了");
     if (listening) {
-      try { recognition.start(); } catch (err) {}
+      // 自動で止まったら再開する
+      setTimeout(() => {
+        if (listening) {
+          try { recognition.start(); } catch (err) { logState("再開失敗: " + err.message); }
+        }
+      }, 300);
     }
   };
 }
 
-function startListening() {
+// マイクの許可を明示的に取得する
+// カメラと同一ページでSpeech APIを使うと、許可が暗黙に失敗することがある。
+// 先にgetUserMediaでマイクを要求し、確実に許可ダイアログを出す。
+async function ensureMicPermission() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    logState("マイク許可 OK");
+    // 許可の確認だけが目的なので、すぐ止める
+    stream.getTracks().forEach((t) => t.stop());
+    return true;
+  } catch (e) {
+    logState("マイク許可 失敗: " + e.name);
+    heardEl.textContent = "マイクの許可が必要です（" + e.name + "）";
+    return false;
+  }
+}
+
+async function startListening() {
   if (!recognition) return;
+
+  const ok = await ensureMicPermission();
+  if (!ok) return;
+
   listening = true;
   micBtn.classList.add("on");
   heardEl.textContent = "聞いています…";
-  try { recognition.start(); } catch (e) {}
+  try {
+    recognition.start();
+  } catch (e) {
+    logState("start例外: " + e.message);
+  }
 }
 
 function stopListening() {
+  logState("停止操作");
   listening = false;
   micBtn.classList.remove("on");
   if (recognition) recognition.stop();
