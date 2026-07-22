@@ -281,22 +281,35 @@ function setupSpeech() {
   recognition.lang = "en-US";      // 英語で聞き取る
   recognition.continuous = true;   // 話し続けても止めない
   recognition.interimResults = true; // 途中経過も受け取る（反応を速く）
+  recognition.maxAlternatives = 5;   // 認識候補を5つまで受け取る
+                                     // 音声認識は「これかもしれない」候補を複数持っている。
+                                     // 1番目だけ見ると外れることが多いので全部照合する。
 
   recognition.onresult = (e) => {
-    let text = "";
     let isFinal = false;
+    const alternatives = []; // 全候補をここに集める
+
     for (let i = e.resultIndex; i < e.results.length; i++) {
-      text += e.results[i][0].transcript;
-      if (e.results[i].isFinal) isFinal = true;
+      const result = e.results[i];
+      if (result.isFinal) isFinal = true;
+      // 候補を全部拾う（1番目だけでなく2番目3番目も）
+      for (let j = 0; j < result.length; j++) {
+        alternatives.push(result[j].transcript.trim());
+      }
     }
-    text = text.trim();
-    heardEl.innerHTML = "聞き取り：<b>" + text + "</b>";
 
-    // 履歴に積む（画面に大きく出す用）。最新5件を保持。
-    heardLog.unshift((isFinal ? "● " : "○ ") + text);
-    if (heardLog.length > 5) heardLog.pop();
+    const main = alternatives[0] || "";
+    heardEl.innerHTML = "聞き取り：<b>" + main + "</b>";
 
-    checkAnswer(text);
+    // 履歴に積む（候補が複数あれば併記）
+    const shown = alternatives.length > 1
+      ? main + "  [他: " + alternatives.slice(1, 4).join(" / ") + "]"
+      : main;
+    heardLog.unshift((isFinal ? "● " : "○ ") + shown);
+    if (heardLog.length > 4) heardLog.pop();
+
+    // 全候補を照合にかける
+    alternatives.forEach((t) => checkAnswer(t));
   };
 
   recognition.onstart = () => logState("開始");
@@ -379,6 +392,36 @@ function normalize(str) {
     .trim();
 }
 
+// ── 2つの語がどれくらい近いかを測る（編集距離）──
+// 1文字の違いなら「近い」と見なす。単語が短いほど厳しく判定する。
+function editDistance(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) =>
+    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
+  );
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+function isClose(spoken, target) {
+  if (!spoken || !target) return false;
+  if (Math.abs(spoken.length - target.length) > 3) return false;
+  const d = editDistance(spoken, target);
+  // 許容する違いの文字数。学習アプリなので「言えたのに認められない」を避け、
+  // 多少甘めに倒す。短い語も1文字までは許容する（bed↔bet を救うため）。
+  //   ～4文字 : 1文字違いまで
+  //   ～7文字 : 2文字違いまで
+  //   8文字～ : 3文字違いまで（長い語は言い間違えやすいので緩く）
+  const allow = target.length <= 4 ? 1 : target.length <= 7 ? 2 : 3;
+  return d <= allow;
+}
+
 // ── 聞き取った言葉が、今見えている単語と一致するか ──
 function checkAnswer(rawText) {
   const text = normalize(rawText);
@@ -406,11 +449,21 @@ function checkAnswer(rawText) {
       candidates.push(parts[parts.length - 1] + "s");
     }
 
-    const hit = candidates.some((c) => {
-      // 単語単位で含まれるかを見る（部分文字列の誤爆を避ける）
+    // ① 単語単位で含まれるか（厳密）
+    let hit = candidates.some((c) => {
       const re = new RegExp("(^|\\s)" + c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "($|\\s)");
       return re.test(text);
     });
+
+    // ② 厳密に外れた場合、音の近さで拾う
+    //    "bed" → "bet"/"bad" のように、短い単語は似た音に化けやすい。
+    //    学習アプリとしては「言えた」体験を優先し、多少の揺れは許容する。
+    if (!hit) {
+      const spokenWords = text.split(" ");
+      hit = spokenWords.some((w) =>
+        candidates.some((c) => isClose(w, c))
+      );
+    }
 
     if (hit) correct(label);
   });
