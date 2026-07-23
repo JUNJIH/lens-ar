@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>LENS Hunt — 部屋の宝探し</title>
+
+  <!--
+    ─────────────────────────────────────────────────────────
+    LENS Hunt（宝探し・第1段階：1端末で完結）
+    ─────────────────────────────────────────────────────────
+    隠す人と探す人が、1台の端末を渡し合って遊ぶ。
+    保存はlocalStorage（この端末の中だけ）。
+
+    ヒントは2段階：
+      ① 隠した人が書いたヒント文（自由記述）
+      ② 部屋単位の「近さ」（同じ部屋のモノが見えるほど数値が下がる）
+         ※ 視界に入れる＝ほぼ答えなので、その一歩手前のヒントとして
+
+    第2段階でサーバー保存にして、2端末で遊べるようにする予定。
+    ─────────────────────────────────────────────────────────
+  -->
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Hiragino Kaku Gothic ProN','Noto Sans JP',system-ui,sans-serif;
+      overflow: hidden; background: #000; color: #f5f5f4;
+    }
+    #stage { position: fixed; inset: 0; }
+    #cam { width: 100%; height: 100%; object-fit: cover; }
+    #overlay { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+    #topbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+      display: flex; align-items: center; gap: 8px;
+      padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
+      background: linear-gradient(180deg, rgba(13,15,18,0.92), rgba(13,15,18,0));
+    }
+    .tab {
+      padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 700;
+      border: 1px solid #3a3f47; background: rgba(28,31,36,.85); color: #f5f5f4;
+      font-family: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent;
+    }
+    .tab.active { background: #f5f5f4; color: #0d0f12; border-color: #f5f5f4; }
+    #count { margin-left: auto; font-size: 13px; font-weight: 700; color: #e0a020; }
+
+    #bottombar {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+      padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+      background: linear-gradient(180deg, rgba(13,15,18,0), rgba(13,15,18,0.92) 40%);
+      font-size: 13px; color: #cbd5e1; min-height: 60px;
+    }
+
+    /* 隠す確認シート */
+    #sheet {
+      position: fixed; inset: 0; z-index: 30;
+      background: rgba(6,7,9,.88);
+      display: none; align-items: flex-end; justify-content: center;
+    }
+    #sheet.show { display: flex; }
+    .card {
+      width: 100%; max-width: 520px;
+      background: #101216; border: 1px solid #23262b; border-bottom: none;
+      border-radius: 20px 20px 0 0;
+      padding: 22px 18px calc(22px + env(safe-area-inset-bottom));
+    }
+    .card h2 { font-size: 18px; margin-bottom: 4px; }
+    .card .sub { font-size: 13px; color: #9ca3af; margin-bottom: 16px; }
+    .card input {
+      width: 100%; padding: 13px; border-radius: 10px; font-size: 15px;
+      background: #0d0f12; border: 1px solid #3a3f47; color: #f5f5f4;
+      font-family: inherit; margin-bottom: 14px;
+    }
+    .row { display: flex; gap: 10px; }
+    .row button {
+      flex: 1; padding: 13px; border-radius: 12px; font-size: 15px; font-weight: 700;
+      font-family: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent;
+    }
+    .ghost { background: transparent; border: 1px solid #3a3f47; color: #f5f5f4; }
+    .primary { background: #e0a020; border: 1px solid #e0a020; color: #0d0f12; }
+    .danger { background: transparent; border: 1px solid #e8462d; color: #e8462d; }
+
+    #found {
+      position: fixed; top: 45%; left: 50%; transform: translate(-50%,-50%);
+      z-index: 25; padding: 26px 40px; border-radius: 20px;
+      background: rgba(13,15,18,.94); border: 3px solid #37b58a;
+      text-align: center; opacity: 0; transition: opacity .3s; pointer-events: none;
+    }
+    #found.show { opacity: 1; }
+    #found .big { font-size: 38px; font-weight: 800; color: #37b58a; margin-bottom: 6px; }
+    #found .small { font-size: 15px; color: #cbd5e1; }
+  </style>
+</head>
+<body>
+
+  <div id="stage">
+    <video id="cam" autoplay muted playsinline></video>
+    <canvas id="overlay"></canvas>
+  </div>
+
+  <div id="topbar">
+    <button class="tab active" id="hideTab">かくす</button>
+    <button class="tab" id="seekTab">さがす</button>
+    <span id="count">宝 0</span>
+  </div>
+
+  <div id="found">
+    <div class="big">みつけた！</div>
+    <div class="small" id="foundText"></div>
+  </div>
+
+  <div id="bottombar">準備中…</div>
+
+  <!-- 隠すときの確認シート -->
+  <div id="sheet">
+    <div class="card">
+      <h2 id="sheetTitle">ここに隠しますか？</h2>
+      <div class="sub" id="sheetSub"></div>
+      <input id="hintInput" placeholder="ヒントを書く（例：つめたいもののなか）" maxlength="40" />
+      <div class="row">
+        <button class="ghost" id="cancelHide">やめる</button>
+        <button class="primary" id="doHide">ここに隠す</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="hunt-app.js"></script>
+</body>
+</html>
